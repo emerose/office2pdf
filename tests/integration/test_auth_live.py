@@ -6,7 +6,7 @@ Set environment variables: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -108,7 +108,7 @@ async def test_token_structure_live(authenticator: Authenticator) -> None:
         # Try to parse expiry time
         try:
             if isinstance(expires_on, (int, float)):
-                expiry_dt = datetime.fromtimestamp(expires_on, tz=timezone.utc)
+                expiry_dt = datetime.fromtimestamp(expires_on, tz=UTC)
                 print(f"  expires_at: {expiry_dt.isoformat()}")
         except Exception as e:
             print(f"  (Could not parse expires_on: {e})")

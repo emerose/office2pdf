@@ -13,35 +13,37 @@ This document outlines the implementation phases needed to complete the office2p
 
 ## Phase 1: Core Graph API Integration
 
-### 1.1 Authentication Flow ⏳
+### 1.1 Authentication Flow ✅ (PR #3)
 **File:** `src/office2pdf/auth.py`
 
-- [ ] Test token acquisition with real Azure credentials
-- [ ] Implement token refresh logic (tokens expire after 1 hour)
-- [ ] Add token caching with expiration tracking
-- [ ] Handle authentication errors (invalid credentials, expired secrets)
-- [ ] Add unit tests with mocked MSAL responses
-- [ ] Add integration tests with real Azure test tenant
+- [x] Test token acquisition with real Azure credentials
+- [x] Implement token refresh logic (tokens expire after 1 hour)
+- [x] Add token caching with expiration tracking
+- [x] Handle authentication errors (invalid credentials, expired secrets)
+- [x] Add unit tests with mocked MSAL responses
+- [x] Add integration tests with real Azure test tenant
 
 **Acceptance Criteria:**
-- Successfully acquire access token from Azure
-- Token automatically refreshes before expiration
-- Clear error messages for auth failures
+- ✅ Successfully acquire access token from Azure
+- ✅ Token automatically refreshes before expiration
+- ✅ Clear error messages for auth failures
 
-### 1.2 Drive/Site Resolution 🔜
+### 1.2 Drive/Site Resolution ✅
 **File:** `src/office2pdf/upload.py`
 
-- [ ] Implement drive ID resolution (if not explicitly provided)
-- [ ] Support OneDrive personal vs. business
-- [ ] Support SharePoint site resolution by site ID
-- [ ] Create folder structure: `{drive_root}/{uuid}/filename`
-- [ ] Handle drive/site not found errors
-- [ ] Add tests for different drive configurations
+- [x] Implement drive ID resolution (if not explicitly provided)
+- [x] Support OneDrive personal vs. business (via drive_id)
+- [x] Support SharePoint site resolution by site ID
+- [x] Create folder structure: `{drive_root}/{uuid}/filename`
+- [x] Handle drive/site not found errors
+- [x] Add tests for different drive configurations
 
 **Acceptance Criteria:**
-- Automatically resolve user's default drive if not specified
-- Create temporary folder structure in correct location
-- Support both OneDrive and SharePoint targets
+- ✅ Resolve drive from explicit drive_id or site_id configuration
+- ✅ Create temporary folder structure in correct location
+- ✅ Support both OneDrive (via drive_id) and SharePoint (via site_id) targets
+- ✅ Clear error messages for missing configuration, drive/site not found, and permission errors
+- ✅ Drive ID caching after first resolution
 
 ## Phase 2: File Upload Implementation
 
