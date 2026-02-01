@@ -258,3 +258,118 @@ async def test_simple_upload_small_file_live(
             delete_url = f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/items/{item_id}"
             delete_response = await http_client.delete(delete_url, headers=headers)
             print(f"\n🗑️ Cleanup: Deleted file (status {delete_response.status_code})")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_DRIVE_ID, reason="AZURE_DRIVE_ID not provided")
+async def test_resumable_upload_large_file_live(
+    http_client: httpx.AsyncClient, authenticator: Authenticator
+) -> None:
+    """Test uploading a large file (> 4MB) using resumable upload session.
+
+    This test creates an upload session, uploads file in chunks, and cleans up.
+    """
+    assert AZURE_DRIVE_ID
+
+    # Get access token
+    token = await authenticator.get_access_token()
+
+    # Create a large test file (5 MB)
+    chunk_size = 320 * 1024  # 320 KiB - required multiple for Graph API
+    test_content = b"X" * (5 * 1024 * 1024)  # 5 MB
+    test_filename = "test_large_upload.bin"
+    upload_path = f"office2pdf-tests/{test_filename}"
+
+    print(f"\n📤 Starting resumable upload for {len(test_content)} bytes to {upload_path}")
+
+    # Step 1: Create upload session
+    create_session_url = (
+        f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/root:/{upload_path}:/createUploadSession"
+    )
+    session_body = {"item": {"@microsoft.graph.conflictBehavior": "replace"}}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    session_response = await http_client.post(
+        create_session_url, headers=headers, json=session_body
+    )
+
+    print(f"\n📊 Upload Session Response (status {session_response.status_code}):")
+    session_response.raise_for_status()
+    session_data = session_response.json()
+
+    print(f"  Upload URL: {session_data.get('uploadUrl', '')[:80]}...")
+    print(f"  Expiration: {session_data.get('expirationDateTime')}")
+    print(f"  Response keys: {list(session_data.keys())}")
+
+    assert "uploadUrl" in session_data
+    assert "expirationDateTime" in session_data
+
+    upload_url = session_data["uploadUrl"]
+    item_id = None
+
+    try:
+        # Step 2: Upload file in chunks
+        total_size = len(test_content)
+        offset = 0
+
+        while offset < total_size:
+            # Calculate chunk boundaries
+            chunk_end = min(offset + chunk_size, total_size)
+            chunk_data = test_content[offset:chunk_end]
+
+            # Upload chunk with Content-Range header
+            chunk_headers = {
+                "Content-Length": str(len(chunk_data)),
+                "Content-Range": f"bytes {offset}-{chunk_end-1}/{total_size}",
+            }
+
+            print(
+                f"  Uploading chunk: bytes {offset}-{chunk_end-1}/{total_size} "
+                f"({len(chunk_data)} bytes)"
+            )
+
+            chunk_response = await http_client.put(
+                upload_url, headers=chunk_headers, content=chunk_data
+            )
+
+            print(f"    Response status: {chunk_response.status_code}")
+
+            if chunk_response.status_code == 202:
+                # More chunks needed
+                chunk_result = chunk_response.json()
+                print(f"    Next ranges: {chunk_result.get('nextExpectedRanges', [])}")
+            elif chunk_response.status_code == 201:
+                # Upload complete!
+                result_data = chunk_response.json()
+                item_id = result_data.get("id")
+                print(f"    ✅ Upload complete!")
+                print(f"    Item ID: {item_id}")
+                print(f"    Name: {result_data.get('name')}")
+                print(f"    Size: {result_data.get('size')}")
+
+                # Verify response structure
+                assert "id" in result_data
+                assert result_data.get("name") == test_filename
+                assert result_data.get("size") == total_size
+            else:
+                # Unexpected status
+                print(f"    Unexpected status: {chunk_response.text}")
+                chunk_response.raise_for_status()
+
+            offset = chunk_end
+
+    finally:
+        # Clean up - delete the uploaded file
+        if item_id:
+            delete_headers = {"Authorization": f"Bearer {token}"}
+            delete_url = f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/items/{item_id}"
+            delete_response = await http_client.delete(delete_url, headers=delete_headers)
+            print(f"\n🗑️ Cleanup: Deleted file (status {delete_response.status_code})")
+        else:
+            # Cancel upload session if we didn't complete
+            print("\n🗑️ Cleanup: Canceling upload session...")
+            cancel_response = await http_client.delete(upload_url)
+            print(f"  Session canceled (status {cancel_response.status_code})")
