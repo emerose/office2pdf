@@ -74,6 +74,11 @@ After all fixes:
 ## Phase 3: Open the PR
 
 ### 3.1 Prepare PR
+- **Update TODO.md**:
+  - Mark items completed in this PR with ✅
+  - Add PR number reference (will be added after PR created, can add in follow-up commit)
+  - Ensure all previous phases are marked complete
+  - Example: Change `- [ ] Test token acquisition` to `- [x] Test token acquisition (PR #3)`
 - Ensure all changes committed
 - Push branch: `git push -u origin <branch-name>`
 - Check current branch tracking: `git branch -vv`
@@ -127,10 +132,31 @@ After PR created:
 ## Phase 4: Monitor and Respond
 
 ### 4.1 Continuous Monitoring
-Poll the PR status regularly:
-- `gh pr checks` - Watch CI status
-- `gh pr view` - Check for new comments
-- `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments` - Fetch comment details
+**Actively poll** the PR status - don't passively wait for updates:
+
+**Use sleep commands to check periodically:**
+- `sleep 20 && gh pr checks` - Check CI status every 20-30 seconds
+- `sleep 20 && gh api repos/{owner}/{repo}/issues/{pr_number}/comments` - Check for new comments
+- `sleep 20 && gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` - Check for reviews
+
+**Example polling loop pattern:**
+```bash
+# Poll until CI checks are complete
+echo "Waiting for CI checks..."
+until gh pr checks --exit-status; do
+  sleep 15
+done
+echo "CI checks complete!"
+
+# Poll until Gemini review is found
+echo "Waiting for Gemini review..."
+until gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq 'any(.user.login == "gemini-code-assist[bot]")' | grep -q true; do
+  sleep 20
+done
+echo "Gemini review found!"
+```
+
+**IMPORTANT**: Always use `sleep` + command, never just stop and wait. Continue checking until you get the information you need.
 
 ### 4.2 Respond to CI Failures
 If CI fails:
@@ -154,9 +180,13 @@ If CI fails:
    - If no issues: Gemini will post a comment saying nothing needs to change
 
 3. **How to Monitor**:
-   - Use `gh pr view` to check for comments from gemini-code-assist
-   - Use `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` to check review status
-   - Look for comments from the gemini-code-assist bot
+   - **CRITICAL**: Use `sleep` commands and actively poll for comments - don't just stop waiting
+   - Check periodically (every 20-30 seconds) using:
+     - `sleep 20 && gh api repos/{owner}/{repo}/issues/{pr_number}/comments --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {created_at, body: .body | .[0:200]}'`
+     - `sleep 20 && gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {submitted_at, state, body}'`
+   - Continue polling until you see Gemini's review
+   - Typically Gemini responds within 30-60 seconds of PR creation
+   - **Do not passively wait** - actively check in a loop until review appears
 
 4. **When Gemini Finds Issues**:
    - Read all of Gemini's comments carefully

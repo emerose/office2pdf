@@ -73,7 +73,13 @@ This file contains project-specific instructions for AI assistants working on th
 ### Pull Requests
 - One PR per sub-phase (e.g., Phase 1.1, Phase 1.2)
 - Include test results in PR description
-- Update TODO.md to mark completed items with ✅
+- **Update TODO.md** before starting work:
+  - At the beginning of phase N, ensure all phases < N are marked complete with ✅
+  - List the PR numbers where each completed phase was implemented
+  - Example: `✅ Phase 1.1: Authentication Flow (PR #3)`
+- **Update TODO.md** during PR submission:
+  - Mark items completed in this PR with ✅
+  - Add PR number reference to completed items
 - **Use the `submit-pr` skill** for complete PR workflow:
   - Thorough code review before submission
   - Fix all identified issues
