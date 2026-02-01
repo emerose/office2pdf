@@ -1,6 +1,7 @@
 """File upload module for Microsoft Graph."""
 
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -16,6 +17,13 @@ HTTP_NOT_FOUND = 404
 HTTP_FORBIDDEN = 403
 HTTP_PAYLOAD_TOO_LARGE = 413
 HTTP_INSUFFICIENT_STORAGE = 507
+HTTP_ACCEPTED = 202  # Chunk accepted, more chunks needed
+HTTP_CREATED = 201  # Upload complete
+
+# Upload constants
+# Chunk size must be a multiple of 320 KiB per Graph API requirements
+# Using 10 MB as a good balance between performance and reliability
+UPLOAD_CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 class Uploader:
@@ -279,24 +287,183 @@ class Uploader:
             msg = f"Network error during upload to {path}: {e}"
             raise UploadError(msg) from e
 
+    async def _create_upload_session(self, drive_id: str, path: str) -> str:
+        """Create an upload session for a large file.
+
+        Args:
+            drive_id: Target drive ID
+            path: Upload path (relative to drive root)
+
+        Returns:
+            Upload URL for the session
+
+        Raises:
+            UploadError: If session creation fails
+        """
+        token = await self.authenticator.get_access_token()
+        encoded_path = quote(path, safe="/")
+        session_url = (
+            f"https://graph.microsoft.com/v1.0/drives/{drive_id}"
+            f"/root:/{encoded_path}:/createUploadSession"
+        )
+
+        session_body = {"item": {"@microsoft.graph.conflictBehavior": "replace"}}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with self.semaphore:
+                response = await self.http.post(
+                    session_url, headers=headers, json=session_body
+                )
+                response.raise_for_status()
+                session_data = response.json()
+                return str(session_data["uploadUrl"])
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == HTTP_NOT_FOUND:
+                msg = f"Drive path not found: {path}"
+                raise UploadError(msg) from e
+            if e.response.status_code == HTTP_FORBIDDEN:
+                msg = (
+                    f"Access denied when creating upload session for: {path}. "
+                    "Check app permissions."
+                )
+                raise UploadError(msg) from e
+
+            # Other HTTP errors
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get("error", {}).get("message", str(e))
+            except (ValueError, KeyError, TypeError):
+                error_msg = str(e)
+            msg = f"Failed to create upload session for {path}: {error_msg}"
+            raise UploadError(msg) from e
+
+        except httpx.RequestError as e:
+            msg = f"Network error while creating upload session for {path}: {e}"
+            raise UploadError(msg) from e
+
+    async def _upload_chunks(
+        self, upload_url: str, file_bytes: bytes, path: str
+    ) -> tuple[str, str]:
+        """Upload file in chunks to the upload session.
+
+        Args:
+            upload_url: Upload URL from session creation
+            file_bytes: File content
+            path: Upload path (for error messages)
+
+        Returns:
+            Tuple of (drive_id, item_id)
+
+        Raises:
+            UploadError: If chunk upload fails
+        """
+        total_size = len(file_bytes)
+        offset = 0
+
+        while offset < total_size:
+            chunk_end = min(offset + UPLOAD_CHUNK_SIZE, total_size)
+            chunk_data = file_bytes[offset:chunk_end]
+
+            chunk_headers = {
+                "Content-Length": str(len(chunk_data)),
+                "Content-Range": f"bytes {offset}-{chunk_end-1}/{total_size}",
+            }
+
+            try:
+                async with self.semaphore:
+                    chunk_response = await self.http.put(
+                        upload_url, headers=chunk_headers, content=chunk_data
+                    )
+                    chunk_response.raise_for_status()
+
+                    if chunk_response.status_code == HTTP_ACCEPTED:
+                        # More chunks needed - continue
+                        pass
+                    elif chunk_response.status_code == HTTP_CREATED:
+                        # Upload complete!
+                        result_data = chunk_response.json()
+                        item_id = str(result_data["id"])
+                        drive_id = str(result_data["parentReference"]["driveId"])
+                        return (drive_id, item_id)
+                    else:
+                        # Unexpected status
+                        msg = (
+                            f"Unexpected status {chunk_response.status_code} "
+                            "while uploading chunk"
+                        )
+                        raise UploadError(msg)
+
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == HTTP_INSUFFICIENT_STORAGE:
+                    msg = "Insufficient storage quota available"
+                    raise UploadError(msg) from e
+
+                # Other HTTP errors
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get("error", {}).get("message", str(e))
+                except (ValueError, KeyError, TypeError):
+                    error_msg = str(e)
+                msg = f"Chunk upload failed for {path}: {error_msg}"
+                raise UploadError(msg) from e
+
+            except httpx.RequestError as e:
+                msg = f"Network error during chunk upload to {path}: {e}"
+                raise UploadError(msg) from e
+
+            offset = chunk_end
+
+        # If we exit the loop without returning, something went wrong
+        msg = "Upload completed but no item ID received"
+        raise UploadError(msg)
+
+    async def _cancel_upload_session(self, upload_url: str) -> None:
+        """Cancel an upload session (best effort).
+
+        Args:
+            upload_url: Upload URL to cancel
+        """
+        with suppress(httpx.HTTPError, OSError):
+            await self.http.delete(upload_url)
+
     async def _upload_large(
         self,
         drive_id: str,
         path: str,
         file_bytes: bytes,
-        content_type: str | None,
+        content_type: str | None,  # noqa: ARG002 - kept for API consistency
     ) -> tuple[str, str]:
         """Resumable upload for large files.
 
+        Uses Microsoft Graph upload session for files >= 4MB.
+        Graph API endpoints:
+            POST /drives/{drive-id}/root:/{path}:/createUploadSession
+            PUT {uploadUrl} (for each chunk)
+
         Args:
             drive_id: Target drive ID
-            path: Upload path
+            path: Upload path (relative to drive root)
             file_bytes: File content
-            content_type: MIME type
+            content_type: MIME type (unused, kept for API consistency)
 
         Returns:
             Tuple of (drive_id, item_id)
+
+        Raises:
+            UploadError: If upload fails
         """
-        # Placeholder - to be implemented in Phase 2.2
-        msg = "Resumable upload not yet implemented"
-        raise NotImplementedError(msg)
+        # Step 1: Create upload session
+        upload_url = await self._create_upload_session(drive_id, path)
+
+        # Step 2: Upload file in chunks (with cleanup on error)
+        try:
+            return await self._upload_chunks(upload_url, file_bytes, path)
+        except (httpx.HTTPError, UploadError):
+            # Cancel upload session on error (best effort)
+            await self._cancel_upload_session(upload_url)
+            raise

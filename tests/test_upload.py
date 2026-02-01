@@ -675,3 +675,201 @@ async def test_simple_upload_non_json_error_response(
 
     # Should handle non-JSON gracefully
     assert "Upload failed" in str(exc_info.value)
+
+
+# Large file upload tests (resumable upload session)
+
+
+@pytest.mark.asyncio
+async def test_large_upload_success(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test successful large file upload using upload session."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Create a 5MB file
+    file_content = b"X" * (5 * 1024 * 1024)
+
+    # Mock drive resolution
+    mock_drive_response = MagicMock()
+    mock_drive_response.status_code = 200
+    mock_drive_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_drive_response)
+
+    # Mock session creation
+    mock_session_response = MagicMock()
+    mock_session_response.status_code = 200
+    mock_session_response.json.return_value = {
+        "uploadUrl": "https://upload.example.com/session-456",
+        "expirationDateTime": "2025-02-01T12:00:00Z",
+    }
+    http_client.post = AsyncMock(return_value=mock_session_response)
+
+    # Mock chunk upload - 5MB file fits in one 10MB chunk, so only one PUT
+    mock_chunk_201 = MagicMock()
+    mock_chunk_201.status_code = 201
+    mock_chunk_201.json.return_value = {
+        "id": "item-789",
+        "name": "large.bin",
+        "size": 5 * 1024 * 1024,
+        "parentReference": {"driveId": "drive-123"},
+    }
+
+    http_client.put = AsyncMock(return_value=mock_chunk_201)
+
+    # Upload
+    drive_id, item_id = await uploader.upload_file(file_content, "large.bin")
+
+    assert drive_id == "drive-123"
+    assert item_id == "item-789"
+
+    # Verify session creation
+    session_call = http_client.post.call_args
+    assert "/createUploadSession" in session_call.args[0]
+    assert session_call.kwargs["json"]["item"]["@microsoft.graph.conflictBehavior"] == "replace"
+
+    # Verify one chunk was uploaded (5MB < 10MB chunk size)
+    assert http_client.put.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_large_upload_session_creation_fails(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling when upload session creation fails."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    file_content = b"X" * (5 * 1024 * 1024)
+
+    # Mock drive resolution
+    mock_drive_response = MagicMock()
+    mock_drive_response.status_code = 200
+    mock_drive_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_drive_response)
+
+    # Mock session creation failure
+    mock_error_response = MagicMock()
+    mock_error_response.status_code = 403
+    mock_error_response.json.return_value = {
+        "error": {"message": "Access denied"}
+    }
+    http_client.post = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "Forbidden", request=MagicMock(), response=mock_error_response
+        )
+    )
+
+    # Should raise UploadError
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(file_content, "large.bin")
+
+    assert "Access denied" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_large_upload_chunk_fails_and_cancels_session(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test that upload session is canceled when chunk upload fails."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    file_content = b"X" * (5 * 1024 * 1024)
+
+    # Mock drive resolution
+    mock_drive_response = MagicMock()
+    mock_drive_response.status_code = 200
+    mock_drive_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_drive_response)
+
+    # Mock session creation
+    mock_session_response = MagicMock()
+    mock_session_response.status_code = 200
+    mock_session_response.json.return_value = {
+        "uploadUrl": "https://upload.example.com/session-456",
+        "expirationDateTime": "2025-02-01T12:00:00Z",
+    }
+    http_client.post = AsyncMock(return_value=mock_session_response)
+
+    # Mock chunk upload failure
+    mock_error_response = MagicMock()
+    mock_error_response.status_code = 507
+    mock_error_response.json.return_value = {
+        "error": {"message": "Insufficient storage"}
+    }
+    http_client.put = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "Insufficient Storage", request=MagicMock(), response=mock_error_response
+        )
+    )
+
+    # Mock session cancellation
+    mock_delete_response = MagicMock()
+    mock_delete_response.status_code = 204
+    http_client.delete = AsyncMock(return_value=mock_delete_response)
+
+    # Should raise UploadError
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(file_content, "large.bin")
+
+    assert "Insufficient storage" in str(exc_info.value)
+
+    # Verify session was canceled
+    delete_call = http_client.delete.call_args
+    assert "upload.example.com" in delete_call.args[0]
+
+
+@pytest.mark.asyncio
+async def test_large_upload_network_error_cancels_session(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test that upload session is canceled on network error."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    file_content = b"X" * (5 * 1024 * 1024)
+
+    # Mock drive resolution
+    mock_drive_response = MagicMock()
+    mock_drive_response.status_code = 200
+    mock_drive_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_drive_response)
+
+    # Mock session creation
+    mock_session_response = MagicMock()
+    mock_session_response.status_code = 200
+    mock_session_response.json.return_value = {
+        "uploadUrl": "https://upload.example.com/session-456",
+        "expirationDateTime": "2025-02-01T12:00:00Z",
+    }
+    http_client.post = AsyncMock(return_value=mock_session_response)
+
+    # Mock network error during chunk upload
+    http_client.put = AsyncMock(
+        side_effect=httpx.RequestError("Connection timeout")
+    )
+
+    # Mock session cancellation
+    mock_delete_response = MagicMock()
+    mock_delete_response.status_code = 204
+    http_client.delete = AsyncMock(return_value=mock_delete_response)
+
+    # Should raise UploadError
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(file_content, "large.bin")
+
+    assert "Network error" in str(exc_info.value)
+
+    # Verify session was canceled
+    delete_call = http_client.delete.call_args
+    assert "upload.example.com" in delete_call.args[0]
