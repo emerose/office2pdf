@@ -47,7 +47,7 @@ This document outlines the implementation phases needed to complete the office2p
 
 ## Phase 2: File Upload Implementation
 
-### 2.1 Simple Upload (< 4MB) 📝
+### 2.1 Simple Upload (< 4MB) ✅ (PR #10)
 **File:** `src/office2pdf/upload.py::_upload_simple()`
 
 **Graph API Endpoint:**
@@ -55,17 +55,17 @@ This document outlines the implementation phases needed to complete the office2p
 PUT /drives/{drive-id}/root:/{path}:/content
 ```
 
-- [ ] Implement simple PUT request with file bytes
-- [ ] Set correct Content-Type header
-- [ ] Parse response to extract drive_id and item_id
-- [ ] Handle upload errors (quota exceeded, invalid path)
+- [x] Implement simple PUT request with file bytes
+- [x] Set correct Content-Type header
+- [x] Parse response to extract drive_id and item_id
+- [x] Handle upload errors (quota exceeded, invalid path)
 - [ ] Add retry logic for transient failures (5xx errors)
-- [ ] Add tests with small test files (< 4MB)
+- [x] Add tests with small test files (< 4MB)
 
 **Acceptance Criteria:**
-- Successfully upload files < 4MB to OneDrive/SharePoint
-- Return valid drive_id and item_id for uploaded file
-- Proper error handling with specific error types
+- ✅ Successfully upload files < 4MB to OneDrive/SharePoint
+- ✅ Return valid drive_id and item_id for uploaded file
+- ✅ Proper error handling with specific error types (413, 403, 507)
 
 ### 2.2 Resumable Upload (≥ 4MB) 📝
 **File:** `src/office2pdf/upload.py::_upload_large()`
