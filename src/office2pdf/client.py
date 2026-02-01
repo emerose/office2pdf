@@ -77,7 +77,9 @@ class OfficeToPdf:
         )
         self._semaphore = asyncio.Semaphore(self.config.concurrency_limit)
         self._authenticator = Authenticator(self.config)
-        self._uploader = Uploader(self.config, self._http_client, self._semaphore)
+        self._uploader = Uploader(
+            self.config, self._http_client, self._semaphore, self._authenticator
+        )
         self._converter = PdfConverter(self.config, self._http_client, self._semaphore)
         self._cleaner = Cleaner(self.config, self._http_client, self._semaphore)
 
