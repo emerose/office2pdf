@@ -39,7 +39,7 @@ pip install office2pdf
 
 1. **Create an Azure App Registration**:
    - Go to [Azure Portal](https://portal.azure.com)
-   - Navigate to Azure Active Directory > App registrations
+   - Navigate to Microsoft Entra ID > Add > App registrations
    - Click "New registration"
    - Note the Tenant ID and Client ID
 
