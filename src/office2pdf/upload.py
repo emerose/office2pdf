@@ -214,18 +214,64 @@ class Uploader:
     ) -> tuple[str, str]:
         """Simple upload for small files.
 
+        Uses the simple PUT endpoint for files < 4MB.
+        Graph API endpoint: PUT /drives/{drive-id}/root:/{path}:/content
+
         Args:
             drive_id: Target drive ID
-            path: Upload path
+            path: Upload path (relative to drive root)
             file_bytes: File content
-            content_type: MIME type
+            content_type: MIME type (defaults to application/octet-stream)
 
         Returns:
             Tuple of (drive_id, item_id)
+
+        Raises:
+            UploadError: If upload fails
         """
-        # Placeholder - to be implemented in Phase 2.1
-        msg = "Simple upload not yet implemented"
-        raise NotImplementedError(msg)
+        token = await self.authenticator.get_access_token()
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/content"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": content_type or "application/octet-stream",
+        }
+
+        try:
+            async with self.semaphore:
+                response = await self.http.put(url, headers=headers, content=file_bytes)
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract drive_id and item_id from response
+                item_id = str(data["id"])
+                response_drive_id = str(data["parentReference"]["driveId"])
+
+                return (response_drive_id, item_id)
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 413:
+                msg = f"File too large for simple upload: {len(file_bytes)} bytes (max 4MB)"
+                raise UploadError(msg) from e
+            if e.response.status_code == HTTP_FORBIDDEN:
+                msg = f"Access denied when uploading to path: {path}. Check app permissions."
+                raise UploadError(msg) from e
+            if e.response.status_code == 507:
+                msg = "Insufficient storage quota available"
+                raise UploadError(msg) from e
+
+            # Other HTTP errors
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get("error", {}).get("message", str(e))
+            except (ValueError, KeyError, TypeError):
+                # JSON decode error or unexpected response structure
+                error_msg = str(e)
+            msg = f"Upload failed for {path}: {error_msg}"
+            raise UploadError(msg) from e
+
+        except httpx.RequestError as e:
+            msg = f"Network error during upload to {path}: {e}"
+            raise UploadError(msg) from e
 
     async def _upload_large(
         self,

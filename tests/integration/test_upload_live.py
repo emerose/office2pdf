@@ -195,3 +195,61 @@ async def test_invalid_site_id_error_live(
     if "error" in error_data:
         print(f"  Error code: {error_data['error'].get('code')}")
         print(f"  Error message: {error_data['error'].get('message')}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_DRIVE_ID, reason="AZURE_DRIVE_ID not provided")
+async def test_simple_upload_small_file_live(
+    http_client: httpx.AsyncClient, authenticator: Authenticator
+) -> None:
+    """Test uploading a small file (< 4MB) using simple PUT upload.
+
+    This test uploads a file, verifies the response, then cleans it up.
+    """
+    assert AZURE_DRIVE_ID
+
+    # Get access token
+    token = await authenticator.get_access_token()
+
+    # Create a small test file
+    test_content = b"Hello from office2pdf integration test! " * 100
+    test_filename = "test_simple_upload.txt"
+    upload_path = f"office2pdf-tests/{test_filename}"
+
+    # Upload the file
+    url = f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/root:/{upload_path}:/content"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "text/plain",
+    }
+
+    print(f"\n📤 Uploading file to {upload_path}")
+    response = await http_client.put(url, headers=headers, content=test_content)
+
+    print(f"\n📊 Upload Response (status {response.status_code}):")
+    if response.status_code in (200, 201):
+        data = response.json()
+        print(f"  Response keys: {list(data.keys())}")
+        print(f"  Item ID: {data.get('id')}")
+        print(f"  Name: {data.get('name')}")
+        print(f"  Size: {data.get('size')}")
+        print(f"  Parent Reference: {data.get('parentReference', {}).keys()}")
+        if "parentReference" in data:
+            print(f"    Drive ID: {data['parentReference'].get('driveId')}")
+            print(f"    Item ID: {data['parentReference'].get('id')}")
+
+        # Verify response structure
+        assert "id" in data
+        assert "parentReference" in data
+        assert "driveId" in data["parentReference"]
+        assert data.get("name") == test_filename
+        assert data.get("size") == len(test_content)
+
+        # Clean up - delete the uploaded file
+        item_id = data["id"]
+        delete_url = f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/items/{item_id}"
+        delete_response = await http_client.delete(delete_url, headers=headers)
+        print(f"\n🗑️ Cleanup: Deleted file (status {delete_response.status_code})")
+    else:
+        print(f"  Error: {response.text}")
+        response.raise_for_status()

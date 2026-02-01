@@ -343,22 +343,38 @@ async def test_upload_file_resolves_drive_id(
     semaphore: asyncio.Semaphore,
     authenticator: Authenticator,
 ) -> None:
-    """Test that upload_file calls drive resolution."""
+    """Test that upload_file calls drive resolution and performs upload."""
     uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
 
     # Mock successful drive verification
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "test-drive-id-123"}
-    http_client.get = AsyncMock(return_value=mock_response)
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "test-drive-id-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
 
-    # Try to upload a file (will fail with NotImplementedError, but that's OK)
-    with pytest.raises(NotImplementedError):
-        await uploader.upload_file(b"test content", "test.txt")
+    # Mock successful upload
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 201
+    mock_put_response.json.return_value = {
+        "id": "test-item-id-456",
+        "name": "test.txt",
+        "parentReference": {"driveId": "test-drive-id-123"},
+    }
+    http_client.put = AsyncMock(return_value=mock_put_response)
+
+    # Upload the file
+    drive_id, item_id = await uploader.upload_file(b"test content", "test.txt")
+
+    # Verify results
+    assert drive_id == "test-drive-id-123"
+    assert item_id == "test-item-id-456"
 
     # Verify drive resolution was called
     http_client.get.assert_called_once()
     assert uploader._resolved_drive_id == "test-drive-id-123"
+
+    # Verify upload was called
+    http_client.put.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -372,18 +388,34 @@ async def test_upload_file_path_traversal_prevention(
     uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
 
     # Mock successful drive verification
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "test-drive-id-123"}
-    http_client.get = AsyncMock(return_value=mock_response)
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "test-drive-id-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
 
-    # Try to upload with path traversal filename
-    # Should raise NotImplementedError (upload not implemented yet), not path traversal
-    with pytest.raises(NotImplementedError):
-        await uploader.upload_file(b"test content", "../../etc/passwd")
+    # Mock successful upload
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 201
+    mock_put_response.json.return_value = {
+        "id": "test-item-id-456",
+        "name": "passwd",  # Sanitized filename
+        "parentReference": {"driveId": "test-drive-id-123"},
+    }
+    http_client.put = AsyncMock(return_value=mock_put_response)
 
-    # The internal upload_path should have been sanitized (we can't check it directly
-    # since upload isn't implemented, but we can verify no exception was raised)
+    # Upload with path traversal filename - should be sanitized to just "passwd"
+    drive_id, item_id = await uploader.upload_file(b"test content", "../../etc/passwd")
+
+    # Verify upload succeeded with sanitized filename
+    assert drive_id == "test-drive-id-123"
+    assert item_id == "test-item-id-456"
+
+    # Verify the upload URL contained only "passwd", not the path traversal
+    call_args = http_client.put.call_args
+    url = call_args.args[0]
+    assert "passwd" in url
+    assert "../" not in url
+    assert "/etc/" not in url
 
 
 @pytest.mark.asyncio
@@ -437,3 +469,209 @@ async def test_verify_drive_non_json_error_response(
 
     # Should handle non-JSON gracefully
     assert "Failed to verify drive" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_success(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test successful simple upload."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
+
+    # Mock successful upload
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 201
+    mock_put_response.json.return_value = {
+        "id": "item-456",
+        "name": "document.docx",
+        "size": 1024,
+        "parentReference": {"driveId": "drive-123"},
+    }
+    http_client.put = AsyncMock(return_value=mock_put_response)
+
+    # Perform upload
+    file_content = b"test file content"
+    drive_id, item_id = await uploader.upload_file(file_content, "document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    assert drive_id == "drive-123"
+    assert item_id == "item-456"
+
+    # Verify PUT was called with correct URL and headers
+    put_call = http_client.put.call_args
+    assert "/drives/drive-123/root:/" in put_call.args[0]
+    assert "document.docx" in put_call.args[0]
+    assert put_call.kwargs["headers"]["Content-Type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert put_call.kwargs["content"] == file_content
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_file_too_large_error(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling when file is too large for simple upload."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
+
+    # Mock 413 response (file too large)
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 413
+    http_client.put = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "413 Payload Too Large",
+            request=MagicMock(),
+            response=mock_put_response,
+        )
+    )
+
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(b"test content", "large.docx")
+
+    assert "File too large" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_access_denied_error(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling for access denied during upload."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
+
+    # Mock 403 response (access denied)
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 403
+    http_client.put = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "403 Forbidden",
+            request=MagicMock(),
+            response=mock_put_response,
+        )
+    )
+
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(b"test content", "document.docx")
+
+    assert "Access denied" in str(exc_info.value)
+    assert "permissions" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_quota_exceeded_error(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling for quota exceeded."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
+
+    # Mock 507 response (insufficient storage)
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 507
+    http_client.put = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "507 Insufficient Storage",
+            request=MagicMock(),
+            response=mock_put_response,
+        )
+    )
+
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(b"test content", "document.docx")
+
+    assert "Insufficient storage quota" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_network_error(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling for network errors during upload."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
+
+    # Mock network error
+    http_client.put = AsyncMock(
+        side_effect=httpx.RequestError("Connection timeout")
+    )
+
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(b"test content", "document.docx")
+
+    assert "Network error" in str(exc_info.value)
+    assert "Connection timeout" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_non_json_error_response(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling when server returns non-JSON error response."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = {"id": "drive-123"}
+    http_client.get = AsyncMock(return_value=mock_get_response)
+
+    # Mock 500 response with plain text (not JSON)
+    mock_put_response = MagicMock()
+    mock_put_response.status_code = 500
+    mock_put_response.text = "Internal Server Error"
+    mock_put_response.json.side_effect = ValueError("Not JSON")  
+    http_client.put = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "500 Server Error",
+            request=MagicMock(),
+            response=mock_put_response,
+        )
+    )
+
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(b"test content", "document.docx")
+
+    # Should handle non-JSON gracefully
+    assert "Upload failed" in str(exc_info.value)
