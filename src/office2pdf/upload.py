@@ -315,9 +315,7 @@ class Uploader:
 
         try:
             async with self.semaphore:
-                response = await self.http.post(
-                    session_url, headers=headers, json=session_body
-                )
+                response = await self.http.post(session_url, headers=headers, json=session_body)
                 response.raise_for_status()
                 session_data = response.json()
                 return str(session_data["uploadUrl"])
@@ -371,7 +369,7 @@ class Uploader:
 
             chunk_headers = {
                 "Content-Length": str(len(chunk_data)),
-                "Content-Range": f"bytes {offset}-{chunk_end-1}/{total_size}",
+                "Content-Range": f"bytes {offset}-{chunk_end - 1}/{total_size}",
             }
 
             try:
@@ -393,8 +391,7 @@ class Uploader:
                     else:
                         # Unexpected status
                         msg = (
-                            f"Unexpected status {chunk_response.status_code} "
-                            "while uploading chunk"
+                            f"Unexpected status {chunk_response.status_code} while uploading chunk"
                         )
                         raise UploadError(msg)
 
