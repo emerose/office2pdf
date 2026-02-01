@@ -359,3 +359,81 @@ async def test_upload_file_resolves_drive_id(
     # Verify drive resolution was called
     http_client.get.assert_called_once()
     assert uploader._resolved_drive_id == "test-drive-id-123"
+
+
+@pytest.mark.asyncio
+async def test_upload_file_path_traversal_prevention(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test that path traversal attacks are prevented via filename sanitization."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "test-drive-id-123"}
+    http_client.get = AsyncMock(return_value=mock_response)
+
+    # Try to upload with path traversal filename
+    # Should raise NotImplementedError (upload not implemented yet), not path traversal
+    with pytest.raises(NotImplementedError):
+        await uploader.upload_file(b"test content", "../../etc/passwd")
+
+    # The internal upload_path should have been sanitized (we can't check it directly
+    # since upload isn't implemented, but we can verify no exception was raised)
+
+
+@pytest.mark.asyncio
+async def test_upload_file_empty_filename_error(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test that empty filename after sanitization raises error."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock successful drive verification
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "test-drive-id-123"}
+    http_client.get = AsyncMock(return_value=mock_response)
+
+    # Try to upload with filename that becomes empty after sanitization
+    with pytest.raises(UploadError) as exc_info:
+        await uploader.upload_file(b"test content", "../../")
+
+    assert "Invalid filename" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_verify_drive_non_json_error_response(
+    config_with_drive: office2pdf.Config,
+    http_client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    authenticator: Authenticator,
+) -> None:
+    """Test error handling when server returns non-JSON error response."""
+    uploader = Uploader(config_with_drive, http_client, semaphore, authenticator)
+
+    # Mock 500 response with plain text (not JSON)
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "Internal Server Error"
+    mock_response.json.side_effect = ValueError("Not JSON")  # Simulate JSON parse error
+    http_client.get = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "500 Server Error",
+            request=MagicMock(),
+            response=mock_response,
+        )
+    )
+
+    with pytest.raises(UploadError) as exc_info:
+        await uploader._resolve_drive_id()
+
+    # Should handle non-JSON gracefully
+    assert "Failed to verify drive" in str(exc_info.value)

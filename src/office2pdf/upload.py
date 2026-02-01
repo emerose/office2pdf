@@ -1,6 +1,7 @@
 """File upload module for Microsoft Graph."""
 
 import asyncio
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -108,8 +109,12 @@ class Uploader:
                 raise UploadError(msg) from e
 
             # Other HTTP errors
-            error_data = e.response.json() if e.response.text else {}
-            error_msg = error_data.get("error", {}).get("message", str(e))
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get("error", {}).get("message", str(e))
+            except (ValueError, KeyError, TypeError):
+                # JSON decode error or unexpected response structure
+                error_msg = str(e)
             msg = f"Failed to verify drive {drive_id}: {error_msg}"
             raise UploadError(msg) from e
 
@@ -148,8 +153,12 @@ class Uploader:
                 raise UploadError(msg) from e
 
             # Other HTTP errors
-            error_data = e.response.json() if e.response.text else {}
-            error_msg = error_data.get("error", {}).get("message", str(e))
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get("error", {}).get("message", str(e))
+            except (ValueError, KeyError, TypeError):
+                # JSON decode error or unexpected response structure
+                error_msg = str(e)
             msg = f"Failed to get drive for site {site_id}: {error_msg}"
             raise UploadError(msg) from e
 
@@ -179,9 +188,16 @@ class Uploader:
         # Resolve drive ID (cached after first resolution)
         drive_id = await self._resolve_drive_id()
 
+        # Sanitize filename to prevent path traversal attacks
+        # Extract just the filename component, stripping any directory path
+        safe_filename = Path(filename).name
+        if not safe_filename or safe_filename in (".", ".."):
+            msg = "Invalid filename: cannot be empty or consist only of path separators"
+            raise UploadError(msg)
+
         # Create unique path for this file
         job_id = uuid4()
-        upload_path = f"{self.config.drive_root}/{job_id}/{filename}"
+        upload_path = f"{self.config.drive_root}/{job_id}/{safe_filename}"
 
         # Determine if we should use simple or resumable upload
         # Microsoft recommends resumable for files > 4MB
