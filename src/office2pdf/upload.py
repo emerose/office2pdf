@@ -13,6 +13,8 @@ from .types import Config
 # HTTP status code constants
 HTTP_NOT_FOUND = 404
 HTTP_FORBIDDEN = 403
+HTTP_PAYLOAD_TOO_LARGE = 413
+HTTP_INSUFFICIENT_STORAGE = 507
 
 
 class Uploader:
@@ -249,13 +251,13 @@ class Uploader:
                 return (response_drive_id, item_id)
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 413:
+            if e.response.status_code == HTTP_PAYLOAD_TOO_LARGE:
                 msg = f"File too large for simple upload: {len(file_bytes)} bytes (max 4MB)"
                 raise UploadError(msg) from e
             if e.response.status_code == HTTP_FORBIDDEN:
                 msg = f"Access denied when uploading to path: {path}. Check app permissions."
                 raise UploadError(msg) from e
-            if e.response.status_code == 507:
+            if e.response.status_code == HTTP_INSUFFICIENT_STORAGE:
                 msg = "Insufficient storage quota available"
                 raise UploadError(msg) from e
 
