@@ -127,10 +127,23 @@ After PR created:
 ## Phase 4: Monitor and Respond
 
 ### 4.1 Continuous Monitoring
-Poll the PR status regularly:
-- `gh pr checks` - Watch CI status
-- `gh pr view` - Check for new comments
-- `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments` - Fetch comment details
+**Actively poll** the PR status - don't passively wait for updates:
+
+**Use sleep commands to check periodically:**
+- `sleep 20 && gh pr checks` - Check CI status every 20-30 seconds
+- `sleep 20 && gh api repos/{owner}/{repo}/issues/{pr_number}/comments` - Check for new comments
+- `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` - Check for reviews
+
+**Example polling loop:**
+```bash
+# Wait for CI to complete
+sleep 15 && gh pr checks
+
+# Wait for Gemini review
+sleep 20 && gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews
+```
+
+**IMPORTANT**: Always use `sleep` + command, never just stop and wait. Continue checking until you get the information you need.
 
 ### 4.2 Respond to CI Failures
 If CI fails:
@@ -154,9 +167,13 @@ If CI fails:
    - If no issues: Gemini will post a comment saying nothing needs to change
 
 3. **How to Monitor**:
-   - Use `gh pr view` to check for comments from gemini-code-assist
-   - Use `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` to check review status
-   - Look for comments from the gemini-code-assist bot
+   - **CRITICAL**: Use `sleep` commands and actively poll for comments - don't just stop waiting
+   - Check periodically (every 20-30 seconds) using:
+     - `sleep 20 && gh api repos/{owner}/{repo}/issues/{pr_number}/comments --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {created_at, body: .body | .[0:200]}'`
+     - `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {submitted_at, state, body}'`
+   - Continue polling until you see Gemini's review
+   - Typically Gemini responds within 30-60 seconds of PR creation
+   - **Do not passively wait** - actively check in a loop until review appears
 
 4. **When Gemini Finds Issues**:
    - Read all of Gemini's comments carefully
