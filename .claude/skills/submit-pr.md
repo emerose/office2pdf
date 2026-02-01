@@ -133,7 +133,37 @@ If CI fails:
 5. Commit and push fix
 6. Monitor until CI passes
 
-### 4.3 Respond to Review Comments
+### 4.3 Wait for Gemini Code Review
+**IMPORTANT**: The gemini-code-assist bot will automatically review all PRs. You MUST wait for Gemini to complete its review before considering the PR done.
+
+**Gemini Review Process**:
+1. **Initial Summary**: Gemini will first post a "summary of changes" comment
+   - This is just acknowledging the PR, not the actual review
+   - Continue waiting after seeing this
+
+2. **Actual Code Review**: Gemini will then perform its code review
+   - If it finds issues: Gemini will add review comments on specific lines
+   - If no issues: Gemini will post a comment saying nothing needs to change
+
+3. **How to Monitor**:
+   - Use `gh pr view` to check for comments from gemini-code-assist
+   - Use `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` to check review status
+   - Look for comments from the gemini-code-assist bot
+
+4. **When Gemini Finds Issues**:
+   - Read all of Gemini's comments carefully
+   - Address each issue systematically (same as human review comments)
+   - Make the requested changes
+   - Push the fixes
+   - Wait for Gemini to re-review if needed
+
+5. **When Gemini Approves**:
+   - Gemini will indicate no changes needed or approve the PR
+   - Only then proceed to the next phase
+
+**Do not skip this step!** Gemini's automated review often catches issues that were missed in the initial code review. Wait for Gemini to finish before proceeding.
+
+### 4.4 Respond to Review Comments (Human and Gemini)
 For each review comment:
 1. **Read Carefully**: Understand the concern/question
 2. **Acknowledge**: Post a response indicating you're addressing it
@@ -156,19 +186,20 @@ Fixed in [commit-sha]:
 [Additional context if needed]
 ```
 
-### 4.4 Request Re-review
+### 4.5 Request Re-review
 After addressing comments:
 - Comment on PR: "All comments addressed, ready for re-review"
 - Use `gh pr comment` to add summary of changes made
 - Be patient and continue monitoring
 
-### 4.5 Keep Monitoring Until Merged
+### 4.6 Keep Monitoring Until Merged
 Continue the cycle:
 1. Check for new comments every few hours
-2. Respond promptly to feedback
+2. Respond promptly to feedback (both Gemini and human reviewers)
 3. Keep CI green
 4. Address any merge conflicts if base branch updates
-5. Continue until PR is approved and merged
+5. Ensure Gemini review is complete and all issues addressed
+6. Continue until PR is approved and merged
 
 ## Phase 5: Post-Merge Cleanup
 
