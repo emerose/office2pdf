@@ -137,15 +137,23 @@ After PR created:
 **Use sleep commands to check periodically:**
 - `sleep 20 && gh pr checks` - Check CI status every 20-30 seconds
 - `sleep 20 && gh api repos/{owner}/{repo}/issues/{pr_number}/comments` - Check for new comments
-- `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` - Check for reviews
+- `sleep 20 && gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews` - Check for reviews
 
-**Example polling loop:**
+**Example polling loop pattern:**
 ```bash
-# Wait for CI to complete
-sleep 15 && gh pr checks
+# Poll until CI checks are complete
+echo "Waiting for CI checks..."
+until gh pr checks --exit-status; do
+  sleep 15
+done
+echo "CI checks complete!"
 
-# Wait for Gemini review
-sleep 20 && gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews
+# Poll until Gemini review is found
+echo "Waiting for Gemini review..."
+until gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq 'any(.user.login == "gemini-code-assist[bot]")' | grep -q true; do
+  sleep 20
+done
+echo "Gemini review found!"
 ```
 
 **IMPORTANT**: Always use `sleep` + command, never just stop and wait. Continue checking until you get the information you need.
@@ -175,7 +183,7 @@ If CI fails:
    - **CRITICAL**: Use `sleep` commands and actively poll for comments - don't just stop waiting
    - Check periodically (every 20-30 seconds) using:
      - `sleep 20 && gh api repos/{owner}/{repo}/issues/{pr_number}/comments --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {created_at, body: .body | .[0:200]}'`
-     - `gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {submitted_at, state, body}'`
+     - `sleep 20 && gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq '.[] | select(.user.login == "gemini-code-assist[bot]") | {submitted_at, state, body}'`
    - Continue polling until you see Gemini's review
    - Typically Gemini responds within 30-60 seconds of PR creation
    - **Do not passively wait** - actively check in a loop until review appears
