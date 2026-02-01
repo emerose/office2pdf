@@ -74,6 +74,12 @@ This file contains project-specific instructions for AI assistants working on th
 - One PR per sub-phase (e.g., Phase 1.1, Phase 1.2)
 - Include test results in PR description
 - Update TODO.md to mark completed items with ✅
+- **Use the `submit-pr` skill** for complete PR workflow:
+  - Thorough code review before submission
+  - Fix all identified issues
+  - Open PR and monitor continuously
+  - Respond to comments and keep tests passing
+  - Continue until merged
 
 ## Testing Best Practices
 
