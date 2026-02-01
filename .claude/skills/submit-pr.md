@@ -74,6 +74,11 @@ After all fixes:
 ## Phase 3: Open the PR
 
 ### 3.1 Prepare PR
+- **Update TODO.md**:
+  - Mark items completed in this PR with ✅
+  - Add PR number reference (will be added after PR created, can add in follow-up commit)
+  - Ensure all previous phases are marked complete
+  - Example: Change `- [ ] Test token acquisition` to `- [x] Test token acquisition (PR #3)`
 - Ensure all changes committed
 - Push branch: `git push -u origin <branch-name>`
 - Check current branch tracking: `git branch -vv`
