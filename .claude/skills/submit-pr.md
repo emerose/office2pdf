@@ -101,6 +101,14 @@ Results from running tests:
 - Unit tests
 - Linting and type checking
 
+## Changelog
+<!--
+Describe changes in a user-friendly way for the changelog.
+Example:
+- **Added**: Support for converting PPTX files.
+- **Fixed**: A bug in token refresh logic.
+-->
+
 ## Acceptance Criteria
 Checklist from TODO.md for this phase, with ✅ for completed items.
 

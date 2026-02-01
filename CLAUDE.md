@@ -86,7 +86,7 @@ This file contains project-specific instructions for AI assistants working on th
 ### Integration Tests
 - Skip if credentials not available
 - Test against real Microsoft Graph API
-- Print useful debugging info (token structure, response keys)
+- Print useful debugging info (like token expiration or response keys), but avoid printing raw tokens or other secrets
 - Use descriptive test names that explain what's being validated
 
 ### Unit Tests
