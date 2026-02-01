@@ -134,18 +134,13 @@ After PR created:
 ### 4.1 Continuous Monitoring
 **Actively poll** the PR status - don't passively wait for updates:
 
-**Example polling loop pattern:**
+**Example polling pattern:**
 ```bash
-# Poll until CI checks are complete
-echo "Waiting for CI checks..."
-while ! gh pr checks > /dev/null 2>&1; do
-  gh pr checks  # Show current status
-  sleep 15
-done
+# Wait for CI checks to complete (uses built-in watch)
+gh pr checks --watch
 echo "CI checks complete!"
-gh pr checks  # Show final status
 
-# Poll until Gemini review is found
+# Poll until Gemini review is found (manual polling required)
 echo "Waiting for Gemini review..."
 while ! gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq 'any(.user.login == "gemini-code-assist[bot]")' | grep -q true; do
   echo "Still waiting for Gemini..."
@@ -156,9 +151,9 @@ gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq '.[] | select(.user.l
 ```
 
 **Key Patterns:**
+- **CI Checks**: Use `gh pr checks --watch` for automatic polling with built-in status display
+- **Manual Polling**: For API endpoints without watch support, use `while ! <condition>; do ... sleep N; done`
 - Sleep comes AFTER the check, not before
-- `gh pr checks` returns exit code 0 when all checks pass, exit code 8 when pending
-- Loop while the condition is NOT met (`while !`)
 - Show status during polling for visibility
 - **IMPORTANT**: Continue checking until you get the information you need - never passively wait
 
