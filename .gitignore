@@ -47,6 +47,10 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
+# Environment variables
+.env
+.env.local
+
 # OS
 .DS_Store
 Thumbs.db
