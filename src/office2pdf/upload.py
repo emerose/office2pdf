@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -232,7 +233,10 @@ class Uploader:
             UploadError: If upload fails
         """
         token = await self.authenticator.get_access_token()
-        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/content"
+        # URL-encode the path to handle special characters like #, ?, %
+        # Use safe="/" to preserve intended slashes in the path
+        encoded_path = quote(path, safe="/")
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{encoded_path}:/content"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": content_type or "application/octet-stream",

@@ -226,9 +226,16 @@ async def test_simple_upload_small_file_live(
     print(f"\n📤 Uploading file to {upload_path}")
     response = await http_client.put(url, headers=headers, content=test_content)
 
-    print(f"\n📊 Upload Response (status {response.status_code}):")
-    if response.status_code in (200, 201):
+    item_id = None
+    try:
+        print(f"\n📊 Upload Response (status {response.status_code}):")
+        if response.status_code not in (200, 201):
+            print(f"  Error: {response.text}")
+            response.raise_for_status()
+
         data = response.json()
+        item_id = data.get("id")
+
         print(f"  Response keys: {list(data.keys())}")
         print(f"  Item ID: {data.get('id')}")
         print(f"  Name: {data.get('name')}")
@@ -245,11 +252,9 @@ async def test_simple_upload_small_file_live(
         assert data.get("name") == test_filename
         assert data.get("size") == len(test_content)
 
+    finally:
         # Clean up - delete the uploaded file
-        item_id = data["id"]
-        delete_url = f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/items/{item_id}"
-        delete_response = await http_client.delete(delete_url, headers=headers)
-        print(f"\n🗑️ Cleanup: Deleted file (status {delete_response.status_code})")
-    else:
-        print(f"  Error: {response.text}")
-        response.raise_for_status()
+        if item_id:
+            delete_url = f"https://graph.microsoft.com/v1.0/drives/{AZURE_DRIVE_ID}/items/{item_id}"
+            delete_response = await http_client.delete(delete_url, headers=headers)
+            print(f"\n🗑️ Cleanup: Deleted file (status {delete_response.status_code})")
